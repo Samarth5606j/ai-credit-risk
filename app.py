@@ -3,159 +3,148 @@ import numpy as np
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
-import os
 
 # ==========================================
-# 1. DATABASE MANAGEMENT (SQL)
+# 1. DATABASE INITIALIZATION
 # ==========================================
 def init_db():
-    """Initializes the SQLite database for the Indian market."""
-    conn = sqlite3.connect('finguard_india.db')
+    conn = sqlite3.connect('ai_credit_manager.db')
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS loan_logs 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp TEXT, 
-                  income REAL, 
-                  cibil_score INTEGER, 
-                  debt REAL, 
-                  experience INTEGER, 
-                  dti REAL, 
-                  risk_prob REAL, 
-                  decision TEXT)''')
-    conn.commit()
-    conn.close()
+                  timestamp TEXT, full_name TEXT, age INTEGER, 
+                  income REAL, cibil_score INTEGER, total_debt REAL, 
+                  monthly_emi REAL, experience INTEGER, dti REAL, 
+                  risk_prob REAL, threshold REAL, decision TEXT)''')
+    conn.commit(); conn.close()
 
-# ==========================================
-# 2. AI ENGINE & ADVISORY LOGIC
-# ==========================================
-class FinGuardAI:
-    def __init__(self):
-        # Weights optimized for: [Income, CIBIL, Debt, Exp, DTI]
-        self.features = ['Income', 'CIBIL Score', 'Debt', 'Experience', 'DTI Ratio']
-        self.weights = np.array([-0.65, -0.95, 0.85, -0.50, 1.30])
-        self.bias = 0.25
-
-    def sigmoid(self, z):
-        return 1 / (1 + np.exp(-z))
-
-    def provide_advice(self, data, prob):
-        inc, scr, dbt, yrs, dti = data
-        advice = []
-        if prob < 0.5:
-            advice.append("✅ **Excellent:** Your financial discipline is impressive. You are eligible for the best market rates.")
-        else:
-            advice.append("⚠️ **Critical Advice to Improve Approval:**")
-            if scr < 750: advice.append(f"• **Boost CIBIL:** Your score of {scr} is low. Avoid new credit inquiries for 6 months.")
-            if dti > 0.40:
-                target_debt = inc * 0.30
-                reduction = dbt - target_debt
-                advice.append(f"• **Debt Reduction:** Reduce your monthly EMI by ₹{reduction:,.2f} to hit a healthy 30% DTI ratio.")
-            if yrs < 3: advice.append("• **Work Stability:** Lenders value 3+ years of experience in the current domain.")
-        return advice
-
-# ==========================================
-# 3. UI & AUTHENTICATION
-# ==========================================
-st.set_page_config(page_title="FinGuard India AI", page_icon="🇮🇳", layout="wide")
+st.set_page_config(page_title="AI CREDIT RISK MANAGER", page_icon="🏦", layout="wide")
 init_db()
 
-if 'authenticated' not in st.session_state:
-    st.session_state['authenticated'] = False
+# Session State for One-Time Saving and Result Persistence
+if 'last_result' not in st.session_state: st.session_state['last_result'] = None
+if 'saved_id' not in st.session_state: st.session_state['saved_id'] = None
 
-# --- LOGIN PAGE ---
+# ==========================================
+# 2. AI ENGINE
+# ==========================================
+class CreditRiskAI:
+    def __init__(self):
+        self.features = ['Income', 'CIBIL Score', 'Total Debt', 'Monthly EMI', 'Experience']
+        self.weights = np.array([-0.60, -0.95, 0.45, 0.85, -0.50])
+        self.bias = 0.35
+
+    def sigmoid(self, z): return 1 / (1 + np.exp(-z))
+
+    def get_prediction(self, raw_inputs):
+        means = np.array([60000, 750, 500000, 15000, 5])
+        stds = np.array([25000, 100, 300000, 10000, 4])
+        scaled = (raw_inputs - means) / stds
+        z = np.dot(scaled, self.weights) + self.bias
+        return self.sigmoid(z), scaled
+
+# ==========================================
+# 3. DASHBOARD
+# ==========================================
+if 'authenticated' not in st.session_state: st.session_state['authenticated'] = False
+
 if not st.session_state['authenticated']:
-    st.title("🛡️ FinGuard AI: India Credit Risk Suite")
-    st.write("---")
-    with st.container():
-        user_input = st.text_input("Agent ID")
-        pass_input = st.text_input("Security PIN", type="password")
-        if st.button("Authorize Entry"):
-            if user_input == "admin" and pass_input == "viva2026":
-                st.session_state['authenticated'] = True
-                st.rerun()
-            else:
-                st.error("Access Denied: Invalid Agent ID or PIN")
-
-# --- MAIN DASHBOARD ---
+    _, col2, _ = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("<h1 style='text-align: center;'>🏦 AI CREDIT RISK MANAGER</h1>", unsafe_allow_html=True)
+        with st.container(border=True):
+            u = st.text_input("Agent ID", placeholder="admin")
+            p = st.text_input("Password", type="password", placeholder="samarth123")
+            if st.button("Authorize Entry", use_container_width=True):
+                if u == "admin" and p == "samarth123":
+                    st.session_state['authenticated'] = True
+                    st.rerun()
+                else: st.error("Invalid Credentials.")
 else:
-    engine = FinGuardAI()
+    engine = CreditRiskAI()
     
-    # Sidebar Controls
-    st.sidebar.title("🇮🇳 Dashboard Control")
-    inc = st.sidebar.number_input("Monthly Income (₹)", 10000, 1000000, 60000, step=5000)
-    scr = st.sidebar.slider("CIBIL / Credit Score", 300, 900, 750)
-    dbt = st.sidebar.number_input("Total Monthly Debt/EMI (₹)", 0, 500000, 15000)
-    yrs = st.sidebar.slider("Work Experience (Years)", 0, 40, 6)
-    dti = dbt / (inc + 1e-9)
-
+    st.sidebar.title("🛠️ Control Center")
+    name = st.sidebar.text_input("Customer Name")
+    age = st.sidebar.number_input("Age", 18, 100, 25)
+    st.sidebar.divider()
+    inc = st.sidebar.number_input("Monthly Income (₹)", 10000, 1000000, 60000)
+    scr = st.sidebar.slider("CIBIL Score", 300, 900, 750)
+    total_debt = st.sidebar.number_input("Total Debt (₹)", 0, 5000000, 100000)
+    monthly_emi = st.sidebar.number_input("Monthly EMI (₹)", 0, 500000, 15000)
+    yrs = st.sidebar.slider("Experience (Years)", 0, 40, 5)
+    threshold = st.sidebar.slider("Risk Threshold", 0.1, 0.9, 0.45)
+    
     if st.sidebar.button("Logout"):
         st.session_state['authenticated'] = False
         st.rerun()
 
-    # Tabs for Organization
-    tab_eval, tab_db, tab_advice = st.tabs(["🎯 Evaluation", "🗄️ SQL Database", "🤖 AI Advisor"])
+    tab_eval, tab_db = st.tabs(["🎯 Risk Analysis & AI Advice", "🗄️ SQL Ledger"])
 
     with tab_eval:
-        st.header("Credit Risk Diagnostic")
-        if st.button("🚀 Analyze Profile"):
-            # Feature Vector & Scaling
-            raw_data = np.array([inc, scr, dbt, yrs, dti])
-            # Scaling parameters centered around Indian middle-class averages
-            scaled = (raw_data - [60000, 750, 20000, 5, 0.35]) / [25000, 100, 12000, 4, 0.2]
+        st.header(f"Profile: {name if name else 'New Applicant'}")
+        
+        if st.button("🚀 Run AI Diagnosis"):
+            raw_data = np.array([inc, scr, total_debt, monthly_emi, yrs])
+            prob, scaled = engine.get_prediction(raw_data)
+            decision = "APPROVED" if prob < threshold else "REJECTED"
+            dti = monthly_emi / (inc + 1e-9)
+            unique_id = f"{name}_{datetime.now().strftime('%H%M%S')}"
             
-            z = np.dot(scaled, engine.weights) + engine.bias
-            prob = engine.sigmoid(z)
-            decision = "APPROVED" if prob < 0.5 else "REJECTED"
-            
-            # Store in session for other tabs
-            st.session_state['last_eval'] = (raw_data, prob)
+            # --- FIX: ONE-TIME SAVE LOGIC ---
+            conn = sqlite3.connect('ai_credit_manager.db')
+            conn.execute('''INSERT INTO loan_logs (timestamp, full_name, age, income, cibil_score, total_debt, monthly_emi, experience, dti, risk_prob, threshold, decision) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                         (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), name, age, inc, scr, total_debt, monthly_emi, yrs, dti, prob, threshold, decision))
+            conn.commit(); conn.close()
 
-            # UI Display
-            col_a, col_b = st.columns(2)
-            with col_a:
-                st.subheader("Result")
-                if decision == "APPROVED": st.success(f"**{decision}**")
-                else: st.error(f"**{decision}**")
-                st.write(f"Risk Probability: **{prob*100:.2f}%**")
-                st.progress(float(prob))
+            st.session_state['last_result'] = {
+                "decision": decision, "prob": prob, "impacts": scaled * engine.weights, 
+                "name": name, "age": age, "dti": dti, "emi": monthly_emi, "inc": inc, "scr": scr
+            }
 
-            with col_b:
-                st.subheader("Decision Drivers")
-                fig, ax = plt.subplots(figsize=(6, 3))
-                impact = scaled * engine.weights
-                ax.barh(engine.features, impact, color=['green' if x < 0 else 'red' for x in impact])
-                st.pyplot(fig)
+        # --- ADVANCED AI RECOMMENDATION ENGINE ---
+        if st.session_state['last_result']:
+            res = st.session_state['last_result']
+            st.markdown("---")
+            c1, c2, c3 = st.columns(3)
+            with c1: st.metric("AI Decision", res['decision'])
+            with c2: st.metric("Risk Probability", f"{res['prob']*100:.2f}%")
+            with c3: st.metric("DTI Ratio", f"{res['dti']*100:.1f}%")
 
-            # Save to SQL
-            conn = sqlite3.connect('finguard_india.db')
-            conn.execute('''INSERT INTO loan_logs 
-                            (timestamp, income, cibil_score, debt, experience, dti, risk_prob, decision) 
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                         (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), inc, scr, dbt, yrs, dti, prob, decision))
-            conn.commit()
-            conn.close()
+            st.subheader("🤖 Comprehensive Financial Advisory")
+            with st.container(border=True):
+                # DTI BASED ADVICE
+                st.markdown("#### 💳 Debt-to-Income (DTI) Analysis")
+                if res['dti'] <= 0.30:
+                    st.success(f"Excellent liquidity! Your DTI of {res['dti']*100:.1f}% is below the ideal 30% limit.")
+                elif 0.30 < res['dti'] <= 0.50:
+                    st.warning(f"Moderate DTI ({res['dti']*100:.1f}%). To improve your AI risk score, consider reducing your monthly EMI by ₹{res['emi'] - (res['inc']*0.3):,.0f} to reach the 30% safety zone.")
+                else:
+                    st.error(f"Critical DTI Detected ({res['dti']*100:.1f}%). The AI model sees your current debt as a 'Cash Flow Burden'. You are highly unlikely to manage a new loan without closing existing liabilities.")
+
+                # DYNAMIC AI STRATEGIES
+                st.markdown("#### 🎯 Personalized Action Plan")
+                highest_impact_idx = np.argmax(res['impacts'])
+                worst_feature = engine.features[highest_impact_idx]
+                
+                if res['decision'] == "REJECTED":
+                    if worst_feature == 'CIBIL Score':
+                        st.write(f"• **Score Recovery:** Your CIBIL is the #1 reason for rejection. Avoid all 'Hard Inquiries' for the next 180 days.")
+                    elif worst_feature == 'Monthly EMI':
+                        st.write(f"• **Liquidity Strategy:** Apply for a 'Loan Top-up' or 'Balance Transfer' to increase your tenure and lower your EMI.")
+                    elif worst_feature == 'Experience':
+                        st.write(f"• **Stability Note:** Your short work tenure is causing risk. Provide a co-applicant with 5+ years of experience to qualify.")
+                else:
+                    st.write(f"• **Prime Status:** You qualify for 'Instant Approval'. Use this to negotiate a 0.25% reduction in the offered ROI (Rate of Interest).")
+
+            fig, ax = plt.subplots(figsize=(10, 3.5))
+            sns.barplot(x=res['impacts'], y=engine.features, palette=['#008080' if x < 0 else '#FF7F50' for x in res['impacts']], ax=ax)
+            st.pyplot(fig)
 
     with tab_db:
-        st.header("SQL Explorer: 'loan_logs'")
-        conn = sqlite3.connect('finguard_india.db')
-        df = pd.read_sql_query("SELECT * FROM loan_logs ORDER BY id DESC", conn)
-        conn.close()
-        
-        if not df.empty:
-            m1, m2 = st.columns(2)
-            m1.metric("Total Records", len(df))
-            m2.metric("Avg Database CIBIL", int(df['cibil_score'].mean()))
-            st.dataframe(df, use_container_width=True)
-        else:
-            st.info("The database is currently empty. Run an evaluation to add data.")
-
-    with tab_advice:
-        st.header("🤖 Personalized AI Recommendation")
-        if 'last_eval' in st.session_state:
-            raw_data, prob = st.session_state['last_eval']
-            advice_list = engine.provide_advice(raw_data, prob)
-            for tip in advice_list:
-                st.write(tip)
-        else:
-            st.warning("Please complete an Evaluation first to generate advice.")
+        st.header("🗄️ SQL Ledger Registry")
+        conn = sqlite3.connect('ai_credit_manager.db')
+        df = pd.read_sql_query("SELECT * FROM loan_logs ORDER BY id DESC", conn); conn.close()
+        st.dataframe(df, use_container_width=True)
